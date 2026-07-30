@@ -93,10 +93,39 @@ function lastUserText(body) {
   return "";
 }
 
+function userTextWithoutInjectedContext(text) {
+  let clean = String(text || "");
+  const markers = [
+    /(?:^|\n)═══\s*eve temperament\b/i,
+    /(?:^|\n)<memory-context>/i,
+    /(?:^|\n)<system-context>/i,
+    /(?:^|\n)\[system note:/i,
+  ];
+  for (const marker of markers) {
+    const match = marker.exec(clean);
+    if (match) clean = clean.slice(0, match.index);
+  }
+  return clean.trim();
+}
+
+/**
+ * Greetings and acknowledgements carry no durable information. Sending them to
+ * Hindsight adds recall latency and can trigger needless background
+ * consolidation/model-refresh calls.
+ */
+export function isTrivialMemoryText(text) {
+  const clean = userTextWithoutInjectedContext(text)
+    .toLocaleLowerCase("pt-BR")
+    .replace(/[!?.,;:…]+$/u, "")
+    .trim();
+
+  return /^(?:oi+|ol[aá]+|oie+|hey|hello|hi|bom dia|boa tarde|boa noite|tudo bem|como vai|ok(?:ay)?|beleza|valeu|obrigad[oa]|rs+|ha(?:ha)+)$/u.test(clean);
+}
+
 export async function recallForProfile(profile, body) {
   if (!profile?.memoryEnabled || !profile?.hindsightBankId) return "";
   const query = lastUserText(body).trim();
-  if (!query) return "";
+  if (!query || isTrivialMemoryText(query)) return "";
   try {
     const response = await fetch(
       `${baseUrl()}/v1/default/banks/${encodeURIComponent(profile.hindsightBankId)}/memories/recall`,
@@ -129,7 +158,7 @@ export async function recallForProfile(profile, body) {
 export async function retainForProfile(profile, body, documentId) {
   if (!profile?.memoryEnabled || !profile?.hindsightBankId) return;
   const content = lastUserText(body).trim();
-  if (!content) return;
+  if (!content || isTrivialMemoryText(content)) return;
   try {
     await fetch(
       `${baseUrl()}/v1/default/banks/${encodeURIComponent(profile.hindsightBankId)}/memories`,
