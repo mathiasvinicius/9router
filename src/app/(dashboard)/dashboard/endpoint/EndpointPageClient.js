@@ -19,16 +19,25 @@ import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
+  const [combos, setCombos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
+  const [profileForm, setProfileForm] = useState({
+    comboId: "", soul: "", hindsightBankId: "", memoryEnabled: true,
+  });
+  const [editingKey, setEditingKey] = useState(null);
+  const [memoryView, setMemoryView] = useState(null);
+  const [memoryLoading, setMemoryLoading] = useState(false);
   const [createdKey, setCreatedKey] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
 
-  const [requireApiKey, setRequireApiKey] = useState(false);
+  const [requireApiKey, setRequireApiKey] = useState(true);
   const [requireLogin, setRequireLogin] = useState(true);
   const [hasPassword, setHasPassword] = useState(true);
- const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
+  const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
+  const [globalInstructions, setGlobalInstructions] = useState("");
+  const [globalInstructionsStatus, setGlobalInstructionsStatus] = useState("");
 
  // Cloudflare Tunnel state
   const [tunnelChecking, setTunnelChecking] = useState(true);
@@ -204,6 +213,7 @@ export default function APIPageClient({ machineId }) {
         setRequireLogin(data.requireLogin !== false);
         setHasPassword(data.hasPassword || false);
         setTunnelDashboardAccess(data.tunnelDashboardAccess || false);
+        setGlobalInstructions(data.globalInstructions || "");
       }
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -253,13 +263,35 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
+  const handleSaveGlobalInstructions = async () => {
+    setGlobalInstructionsStatus("Saving...");
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ globalInstructions }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save global instructions");
+      setGlobalInstructions(data.globalInstructions || "");
+      setGlobalInstructionsStatus("Saved");
+    } catch (error) {
+      setGlobalInstructionsStatus(error.message);
+    }
+  };
+
   const fetchData = async () => {
     try {
-      const keysRes = await fetch("/api/keys");
+      const [keysRes, combosRes] = await Promise.all([
+        fetch("/api/keys"),
+        fetch("/api/combos"),
+      ]);
       const keysData = await keysRes.json();
+      const combosData = await combosRes.json();
       if (keysRes.ok) {
         setKeys(keysData.keys || []);
       }
+      if (combosRes.ok) setCombos(combosData.combos || []);
     } catch (error) {
       console.log("Error fetching data:", error);
     } finally {
@@ -608,13 +640,13 @@ export default function APIPageClient({ machineId }) {
   };
 
   const handleCreateKey = async () => {
-    if (!newKeyName.trim()) return;
+    if (!newKeyName.trim() || !profileForm.comboId || !profileForm.hindsightBankId.trim()) return;
 
     try {
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newKeyName }),
+        body: JSON.stringify({ name: newKeyName, ...profileForm }),
       });
       const data = await res.json();
 
@@ -622,11 +654,54 @@ export default function APIPageClient({ machineId }) {
         setCreatedKey(data.key);
         await fetchData();
         setNewKeyName("");
+        setProfileForm({ comboId: "", soul: "", hindsightBankId: "", memoryEnabled: true });
         setShowAddModal(false);
       }
     } catch (error) {
       console.log("Error creating key:", error);
     }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!editingKey) return;
+    const res = await fetch(`/api/keys/${editingKey.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(editingKey),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setKeys((current) => current.map((item) => item.id === editingKey.id ? data.key : item));
+      setEditingKey(null);
+    }
+  };
+
+  const handleOpenMemories = async (key) => {
+    setMemoryView({ key, items: [], total: 0, error: "" });
+    setMemoryLoading(true);
+    try {
+      const res = await fetch(`/api/keys/${key.id}/memories?limit=100`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load memories");
+      const items = data.items || data.memories || data.results || [];
+      setMemoryView({ key, items, total: data.total ?? data.count ?? items.length, error: "" });
+    } catch (error) {
+      setMemoryView({ key, items: [], total: 0, error: error.message });
+    } finally {
+      setMemoryLoading(false);
+    }
+  };
+
+  const handleClearMemories = (key) => {
+    setConfirmState({
+      title: "Clear Memory Bank",
+      message: `Delete all memories from "${key.hindsightBankId}"? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        const res = await fetch(`/api/keys/${key.id}/memories`, { method: "DELETE" });
+        if (res.ok) setMemoryView({ key, items: [], total: 0, error: "" });
+      },
+    });
   };
 
   const handleDeleteKey = async (id) => {
@@ -948,6 +1023,39 @@ export default function APIPageClient({ machineId }) {
         )}
       </Card>
 
+      {/* Instructions common to every identity-aware API key */}
+      <Card>
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">policy</span>
+            Global Identity & Memory Instructions
+          </h2>
+          <p className="mt-1 text-sm text-text-muted">
+            Applied to every non-service API key before its SOUL.md, mental model and recalled memories.
+            Keep profile-specific personality and private data in each key&apos;s SOUL.md.
+          </p>
+        </div>
+        <textarea
+          className="min-h-72 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm"
+          value={globalInstructions}
+          onChange={(event) => {
+            setGlobalInstructions(event.target.value);
+            setGlobalInstructionsStatus("");
+          }}
+          maxLength={20000}
+          placeholder="Shared rules for identity, memory retrieval and tool usage"
+        />
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-text-muted">
+            {globalInstructions.length.toLocaleString()} / 20,000 characters
+            {globalInstructionsStatus ? ` · ${globalInstructionsStatus}` : ""}
+          </p>
+          <Button onClick={handleSaveGlobalInstructions} icon="save">
+            Save global instructions
+          </Button>
+        </div>
+      </Card>
+
       {/* API Keys */}
       <Card id="require-api-key">
         <div className="flex items-center justify-between mb-4">
@@ -967,10 +1075,7 @@ export default function APIPageClient({ machineId }) {
               Requests without a valid key will be rejected
             </p>
           </div>
-          <Toggle
-            checked={requireApiKey}
-            onChange={() => handleRequireApiKey(!requireApiKey)}
-          />
+          <Toggle checked disabled title="API key authentication is mandatory" />
         </div>
 
         {isRemoteHost && !requireApiKey && (
@@ -1024,11 +1129,31 @@ export default function APIPageClient({ machineId }) {
                   <p className="text-xs text-text-muted mt-1">
                     Created {new Date(key.createdAt).toLocaleDateString()}
                   </p>
+                  <p className="text-xs text-text-muted mt-1">
+                    Combo: {combos.find((combo) => combo.id === key.comboId)?.name || "Not assigned"}
+                    {" · "}Memory: {key.memoryEnabled ? key.hindsightBankId || "Not assigned" : "Disabled"}
+                    {key.mentalModelId ? ` · Mental model: ${key.mentalModelId}` : ""}
+                  </p>
                   {key.isActive === false && (
                     <p className="text-xs text-orange-500 mt-1">Paused</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleOpenMemories(key)}
+                    disabled={!key.memoryEnabled || !key.hindsightBankId}
+                    className="p-2 hover:bg-primary/10 rounded text-primary disabled:opacity-30 transition-all"
+                    title="View Hindsight memories"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">psychology</span>
+                  </button>
+                  <button
+                    onClick={() => setEditingKey({ ...key })}
+                    className="p-2 hover:bg-primary/10 rounded text-primary opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
+                    title="Edit identity and memory"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">edit</span>
+                  </button>
                   <Toggle
                     size="sm"
                     checked={key.isActive ?? true}
@@ -1077,8 +1202,43 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setNewKeyName(e.target.value)}
             placeholder="Production Key"
           />
+          <label className="text-sm font-medium">
+            Combination
+            <select
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2"
+              value={profileForm.comboId}
+              onChange={(event) => setProfileForm((value) => ({ ...value, comboId: event.target.value }))}
+            >
+              <option value="">Select a combination</option>
+              {combos.map((combo) => <option key={combo.id} value={combo.id}>{combo.name}</option>)}
+            </select>
+          </label>
+          <Input
+            label="Hindsight Bank ID"
+            value={profileForm.hindsightBankId}
+            onChange={(event) => setProfileForm((value) => ({ ...value, hindsightBankId: event.target.value }))}
+            placeholder="eve, mind, work..."
+          />
+          <p className="rounded-lg border border-border bg-surface-2 p-3 text-xs text-text-muted">
+            A mental model will be created automatically and refreshed after Hindsight consolidations.
+          </p>
+          <label className="text-sm font-medium">
+            SOUL.md
+            <textarea
+              className="mt-1 min-h-48 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm"
+              value={profileForm.soul}
+              onChange={(event) => setProfileForm((value) => ({ ...value, soul: event.target.value }))}
+              placeholder="Personality, values, style and permanent instructions"
+            />
+          </label>
+          <label className="flex items-center gap-3 text-sm">
+            <input type="checkbox" checked={profileForm.memoryEnabled}
+              onChange={(event) => setProfileForm((value) => ({ ...value, memoryEnabled: event.target.checked }))} />
+            Enable Hindsight memory
+          </label>
           <div className="flex gap-2">
-            <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
+            <Button onClick={handleCreateKey} fullWidth
+              disabled={!newKeyName.trim() || !profileForm.comboId || !profileForm.hindsightBankId.trim()}>
               Create
             </Button>
             <Button
@@ -1093,6 +1253,85 @@ export default function APIPageClient({ machineId }) {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!editingKey}
+        title="Edit API Key Identity"
+        onClose={() => setEditingKey(null)}
+      >
+        {editingKey && <div className="flex flex-col gap-4">
+          <Input label="Key Name" value={editingKey.name || ""}
+            onChange={(event) => setEditingKey((value) => ({ ...value, name: event.target.value }))} />
+          <label className="text-sm font-medium">
+            Combination
+            <select className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2"
+              value={editingKey.comboId || ""}
+              onChange={(event) => setEditingKey((value) => ({ ...value, comboId: event.target.value }))}>
+              <option value="">Select a combination</option>
+              {combos.map((combo) => <option key={combo.id} value={combo.id}>{combo.name}</option>)}
+            </select>
+          </label>
+          <Input label="Hindsight Bank ID" value={editingKey.hindsightBankId || ""}
+            onChange={(event) => setEditingKey((value) => ({ ...value, hindsightBankId: event.target.value }))} />
+          <Input label="Automatic Mental Model" value={editingKey.mentalModelId || "Created on next migration"}
+            readOnly />
+          <label className="text-sm font-medium">
+            SOUL.md
+            <textarea className="mt-1 min-h-64 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm"
+              value={editingKey.soul || ""}
+              onChange={(event) => setEditingKey((value) => ({ ...value, soul: event.target.value }))} />
+          </label>
+          <label className="flex items-center gap-3 text-sm">
+            <input type="checkbox" checked={editingKey.memoryEnabled !== false}
+              onChange={(event) => setEditingKey((value) => ({ ...value, memoryEnabled: event.target.checked }))} />
+            Enable Hindsight memory
+          </label>
+          <div className="flex gap-2">
+            <Button fullWidth onClick={handleSaveProfile}
+              disabled={!editingKey.comboId || !editingKey.hindsightBankId}>Save</Button>
+            <Button fullWidth variant="ghost" onClick={() => setEditingKey(null)}>Cancel</Button>
+          </div>
+        </div>}
+      </Modal>
+
+      <Modal
+        isOpen={!!memoryView}
+        title={`Memories · ${memoryView?.key?.name || ""}`}
+        onClose={() => setMemoryView(null)}
+      >
+        {memoryView && <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Bank: {memoryView.key.hindsightBankId}</p>
+              <p className="text-xs text-text-muted">{memoryView.total} memories</p>
+            </div>
+            <Button variant="danger" size="sm" onClick={() => handleClearMemories(memoryView.key)}
+              disabled={memoryLoading || memoryView.total === 0}>Clear bank</Button>
+          </div>
+          {memoryLoading ? (
+            <p className="py-8 text-center text-sm text-text-muted">Loading memories...</p>
+          ) : memoryView.error ? (
+            <p className="rounded-lg border border-red-300 bg-red-500/5 p-3 text-sm text-red-600">{memoryView.error}</p>
+          ) : memoryView.items.length === 0 ? (
+            <p className="py-8 text-center text-sm text-text-muted">No memories found.</p>
+          ) : (
+            <div className="max-h-[55vh] space-y-2 overflow-y-auto">
+              {memoryView.items.map((item, index) => (
+                <div key={item.id || item.memory_id || index} className="rounded-lg border border-border p-3">
+                  <p className="whitespace-pre-wrap text-sm">
+                    {item.text || item.content || item.fact || item.memory || JSON.stringify(item)}
+                  </p>
+                  {(item.fact_type || item.type || item.date || item.created_at || item.createdAt) && (
+                    <p className="mt-2 text-xs text-text-muted">
+                      {[item.fact_type || item.type, item.date || item.created_at || item.createdAt].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>}
       </Modal>
 
       {/* Created Key Modal */}

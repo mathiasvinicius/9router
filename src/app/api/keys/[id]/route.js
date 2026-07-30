@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { deleteApiKey, getApiKeyById, updateApiKey } from "@/lib/localDb";
+import { deleteApiKey, getApiKeyById, getComboById, updateApiKey } from "@/lib/localDb";
+import { ensureBank, ensureMentalModel } from "@/lib/identityMemory/hindsight.js";
 
 // GET /api/keys/[id] - Get single key
 export async function GET(request, { params }) {
@@ -21,7 +22,7 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { isActive } = body;
+    const { isActive, name, comboId, soul, hindsightBankId, memoryEnabled } = body;
 
     const existing = await getApiKeyById(id);
     if (!existing) {
@@ -30,6 +31,25 @@ export async function PUT(request, { params }) {
 
     const updateData = {};
     if (isActive !== undefined) updateData.isActive = isActive;
+    if (name !== undefined) updateData.name = String(name).trim();
+    if (comboId !== undefined) {
+      if (!comboId || !(await getComboById(comboId))) {
+        return NextResponse.json({ error: "A valid combo is required" }, { status: 400 });
+      }
+      updateData.comboId = comboId;
+    }
+    if (soul !== undefined) updateData.soul = String(soul);
+    if (hindsightBankId !== undefined) {
+      if (!hindsightBankId || !/^[a-zA-Z0-9_.-]+$/.test(hindsightBankId)) {
+        return NextResponse.json({ error: "Invalid Hindsight bank ID" }, { status: 400 });
+      }
+      updateData.hindsightBankId = hindsightBankId;
+      await ensureBank(hindsightBankId, updateData.name || existing.name);
+      if (existing.mentalModelId) {
+        await ensureMentalModel(hindsightBankId, existing.mentalModelId, updateData.name || existing.name);
+      }
+    }
+    if (memoryEnabled !== undefined) updateData.memoryEnabled = !!memoryEnabled;
 
     const updated = await updateApiKey(id, updateData);
 

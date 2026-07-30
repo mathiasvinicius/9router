@@ -19,6 +19,7 @@ export default {
     validateUrl: "https://api.fireworks.ai/inference/v1/models",
   },
   models: [
+    { id: "accounts/fireworks/models/glm-5p2", name: "GLM 5.2" },
     { id: "accounts/fireworks/models/deepseek-v3p1", name: "DeepSeek V3.1" },
     { id: "accounts/fireworks/models/llama-v3p3-70b-instruct", name: "Llama 3.3 70B" },
     { id: "accounts/fireworks/models/qwen3-235b-a22b", name: "Qwen3 235B" },

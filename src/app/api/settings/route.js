@@ -17,6 +17,7 @@ const PROTECTED_SETTING_KEYS = ["password", "mitmSudoEncrypted"];
 export async function GET() {
   try {
     const settings = await getSettings();
+    settings.requireApiKey = true;
     const { password, oidcClientSecret, ...safeSettings } = settings;
     safeSettings.oidcConfigured = !!(safeSettings.oidcIssuerUrl && safeSettings.oidcClientId && oidcClientSecret);
     
@@ -41,6 +42,17 @@ export async function PATCH(request) {
 
     // Strip protected secrets before any internal handling sets them
     for (const key of PROTECTED_SETTING_KEYS) delete body[key];
+    body.requireApiKey = true;
+
+    if (Object.prototype.hasOwnProperty.call(body, "globalInstructions")) {
+      if (typeof body.globalInstructions !== "string") {
+        return NextResponse.json({ error: "Global instructions must be text" }, { status: 400 });
+      }
+      body.globalInstructions = body.globalInstructions.trim();
+      if (body.globalInstructions.length > 20000) {
+        return NextResponse.json({ error: "Global instructions are limited to 20,000 characters" }, { status: 400 });
+      }
+    }
 
     // If updating password, hash it
     if (body.newPassword) {

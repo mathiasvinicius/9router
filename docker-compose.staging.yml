@@ -1,0 +1,18 @@
+services:
+  zion-router:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zion-router:local
+    container_name: zion-router
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /opt/zion-router/data:/app/data
+    environment:
+      DATA_DIR: /app/data
+      PORT: "20131"
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: production
+      HEADROOM_URL: http://127.0.0.1:8878
+      HINDSIGHT_API_URL: http://127.0.0.1:8888

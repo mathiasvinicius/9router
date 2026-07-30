@@ -8,8 +8,15 @@ function rowToKey(row) {
     key: row.key,
     name: row.name,
     machineId: row.machineId,
+    comboId: row.comboId || null,
+    soul: row.soul || "",
+    hindsightBankId: row.hindsightBankId || null,
+    mentalModelId: row.mentalModelId || null,
+    memoryEnabled: row.memoryEnabled === 1 || row.memoryEnabled === true,
+    isService: row.isService === 1 || row.isService === true,
     isActive: row.isActive === 1 || row.isActive === true,
     createdAt: row.createdAt,
+    updatedAt: row.updatedAt || row.createdAt,
   };
 }
 
@@ -25,7 +32,7 @@ export async function getApiKeyById(id) {
   return rowToKey(row);
 }
 
-export async function createApiKey(name, machineId) {
+export async function createApiKey(name, machineId, profile = {}) {
   if (!machineId) throw new Error("machineId is required");
   const db = await getAdapter();
   const { generateApiKeyWithMachine } = await import("@/shared/utils/apiKey");
@@ -35,12 +42,22 @@ export async function createApiKey(name, machineId) {
     name,
     key: result.key,
     machineId,
+    comboId: profile.comboId || null,
+    soul: profile.soul || "",
+    hindsightBankId: profile.hindsightBankId || null,
+    mentalModelId: profile.mentalModelId || null,
+    memoryEnabled: profile.memoryEnabled !== false,
+    isService: profile.isService === true,
     isActive: true,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-    [apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, 1, apiKey.createdAt]
+    `INSERT INTO apiKeys(id, key, name, machineId, comboId, soul, hindsightBankId, mentalModelId, memoryEnabled, isService, isActive, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, apiKey.comboId, apiKey.soul,
+      apiKey.hindsightBankId, apiKey.mentalModelId, apiKey.memoryEnabled ? 1 : 0, apiKey.isService ? 1 : 0,
+      1, apiKey.createdAt, apiKey.updatedAt]
   );
   return apiKey;
 }
@@ -52,9 +69,13 @@ export async function updateApiKey(id, data) {
     const row = db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]);
     if (!row) return;
     const merged = { ...rowToKey(row), ...data };
+    merged.updatedAt = new Date().toISOString();
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ? WHERE id = ?`,
-      [merged.key, merged.name, merged.machineId, merged.isActive ? 1 : 0, id]
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, comboId = ?, soul = ?,
+       hindsightBankId = ?, mentalModelId = ?, memoryEnabled = ?, isService = ?, isActive = ?, updatedAt = ? WHERE id = ?`,
+      [merged.key, merged.name, merged.machineId, merged.comboId || null, merged.soul || "",
+        merged.hindsightBankId || null, merged.mentalModelId || null, merged.memoryEnabled ? 1 : 0, merged.isService ? 1 : 0,
+        merged.isActive ? 1 : 0, merged.updatedAt, id]
     );
     result = merged;
   });
@@ -72,4 +93,10 @@ export async function validateApiKey(key) {
   const row = db.get(`SELECT isActive FROM apiKeys WHERE key = ?`, [key]);
   if (!row) return false;
   return row.isActive === 1 || row.isActive === true;
+}
+
+export async function getApiKeyByValue(key) {
+  const db = await getAdapter();
+  const row = db.get(`SELECT * FROM apiKeys WHERE key = ? AND isActive = 1`, [key]);
+  return rowToKey(row);
 }

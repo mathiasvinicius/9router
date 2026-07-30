@@ -2,6 +2,7 @@ import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS, getModelKind } from "@/shared/co
 import {
   AI_PROVIDERS,
   getProviderAlias,
+  resolveProviderId,
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
@@ -220,6 +221,34 @@ function comboMatchesKinds(combo, kindFilter) {
   return kindFilter.includes(kind);
 }
 
+// OpenAI-compatible clients such as Hermes inspect /v1/models to discover the
+// usable context window. A combo has no model metadata of its own, so derive it
+// from its current members on every request. Using the largest window lets a
+// fallback combo expose all context offered by at least one active member.
+function getComboCapabilities(combo) {
+  const memberCaps = (Array.isArray(combo?.models) ? combo.models : [])
+    .map((routedModel) => {
+      if (typeof routedModel !== "string" || !routedModel.trim()) return null;
+      const separator = routedModel.indexOf("/");
+      const providerAlias = separator > 0 ? routedModel.slice(0, separator) : "";
+      const modelId = separator > 0 ? routedModel.slice(separator + 1) : routedModel;
+      return getCapabilitiesForModel(resolveProviderId(providerAlias), modelId);
+    })
+    .filter(Boolean);
+
+  if (memberCaps.length === 0) return null;
+
+  const contextWindow = Math.max(
+    ...memberCaps.map((caps) => Number(caps.contextWindow) || 0),
+  );
+  const maxOutput = Math.max(
+    ...memberCaps.map((caps) => Number(caps.maxOutput) || 0),
+  );
+
+  if (contextWindow <= 0) return null;
+  return { contextWindow, maxOutput };
+}
+
 /**
  * Build OpenAI-format models list filtered by service kinds.
  * @param {string[]} kindFilter - List of service kinds to include (e.g. ["llm"], ["webSearch","webFetch"]).
@@ -283,6 +312,17 @@ export async function buildModelsList(kindFilter, options = {}) {
       object: "model",
       owned_by: "combo",
     };
+    if ((combo.kind || LLM_KIND) === LLM_KIND) {
+      const capabilities = getComboCapabilities(combo);
+      if (capabilities) {
+        // `context_length` is consumed by Hermes. The companion fields keep
+        // compatibility with other OpenAI-style clients and the dashboard.
+        entry.context_length = capabilities.contextWindow;
+        entry.context_window = capabilities.contextWindow;
+        entry.max_output_tokens = capabilities.maxOutput;
+        entry.capabilities = capabilities;
+      }
+    }
     if (combo.kind === "webSearch" || combo.kind === "webFetch") {
       entry.kind = combo.kind;
     }

@@ -236,11 +236,23 @@ const STRATEGY_OPTIONS = [
   { value: "fusion", label: "Fusion — panel + judge" },
 ];
 
+function formatContextWindow(tokens) {
+  if (!tokens) return "unknown";
+  if (tokens >= 1_000_000) {
+    return `${Number((tokens / 1_000_000).toFixed(2))}M`;
+  }
+  return `${Math.round(tokens / 1_000)}K`;
+}
+
 function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   const isFusion = current === "fusion";
+  const contextWindows = combo.models
+    .map((model) => Number(getCaps?.(model)?.contextWindow) || 0)
+    .filter((value) => value > 0);
+  const automaticContext = contextWindows.length > 0 ? Math.max(...contextWindows) : 0;
 
   return (
     <Card padding="sm" className="group">
@@ -265,6 +277,13 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
               {combo.models.length > 3 && (
                 <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
               )}
+            </div>
+            <div
+              className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-text-muted"
+              title="Automatically advertised through /v1/models from the largest context window among combo members"
+            >
+              <span className="material-symbols-outlined text-[13px]">memory</span>
+              <span>Automatic context: {formatContextWindow(automaticContext)}</span>
             </div>
             {/* Fusion: judge picker (Auto = first model) */}
             {isFusion && (

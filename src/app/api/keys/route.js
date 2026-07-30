@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { getApiKeys, createApiKey } from "@/lib/localDb";
+import { getApiKeys, createApiKey, getComboById } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { ensureBank, ensureMentalModel } from "@/lib/identityMemory/hindsight.js";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const keys = await getApiKeys();
-    return NextResponse.json({ keys });
+    return NextResponse.json({ keys: keys.filter((key) => !key.isService) });
   } catch (error) {
     console.log("Error fetching keys:", error);
     return NextResponse.json({ error: "Failed to fetch keys" }, { status: 500 });
@@ -19,21 +20,42 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name } = body;
+    const { name, comboId, soul, hindsightBankId, memoryEnabled } = body;
 
     if (!name) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
+    if (!comboId || !(await getComboById(comboId))) {
+      return NextResponse.json({ error: "A valid combo is required" }, { status: 400 });
+    }
+    if (!hindsightBankId || !/^[a-zA-Z0-9_.-]+$/.test(hindsightBankId)) {
+      return NextResponse.json({ error: "A valid Hindsight bank ID is required" }, { status: 400 });
+    }
 
     // Always get machineId from server
     const machineId = await getConsistentMachineId();
-    const apiKey = await createApiKey(name, machineId);
+    await ensureBank(hindsightBankId, name);
+    const slug = String(name).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "profile";
+    const mentalModelId = `${slug}-${crypto.randomUUID().slice(0, 8)}`;
+    await ensureMentalModel(hindsightBankId, mentalModelId, name);
+    const apiKey = await createApiKey(name, machineId, {
+      comboId,
+      soul: typeof soul === "string" ? soul : "",
+      hindsightBankId,
+      mentalModelId,
+      memoryEnabled: memoryEnabled !== false,
+    });
 
     return NextResponse.json({
       key: apiKey.key,
       name: apiKey.name,
       id: apiKey.id,
       machineId: apiKey.machineId,
+      comboId: apiKey.comboId,
+      hindsightBankId: apiKey.hindsightBankId,
+      mentalModelId: apiKey.mentalModelId,
+      memoryEnabled: apiKey.memoryEnabled,
     }, { status: 201 });
   } catch (error) {
     console.log("Error creating key:", error);

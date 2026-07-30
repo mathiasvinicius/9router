@@ -1,4 +1,5 @@
 import "open-sse/index.js";
+import { createHash } from "node:crypto";
 
 import {
   getProviderCredentials,
@@ -8,7 +9,8 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getApiKeyByValue, getComboById } from "@/lib/localDb";
+import { mentalModelForProfile, recallForProfile, retainForProfile } from "@/lib/identityMemory/hindsight.js";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -48,7 +50,7 @@ export async function handleChat(request, clientRawRequest = null) {
   }
   cacheClaudeHeaders(clientRawRequest.headers);
 
-  const modelStr = body.model;
+  let modelStr = body.model;
 
   // Request summary is emitted as the unified "▶" line in chatCore (has fmt/thinking/account)
 
@@ -62,18 +64,44 @@ export async function handleChat(request, clientRawRequest = null) {
     log.debug("AUTH", "No API key provided (local mode)");
   }
 
-  // Enforce API key if enabled in settings
+  // Identity-aware deployments always require a valid API key.
   const settings = await getSettings();
-  if (settings.requireApiKey) {
-    if (!apiKey) {
-      log.warn("AUTH", "Missing API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
-    }
-    const valid = await isValidApiKey(apiKey);
-    if (!valid) {
-      log.warn("AUTH", "Invalid API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
-    }
+  if (!apiKey) {
+    log.warn("AUTH", "Missing API key");
+    return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
+  }
+  const profile = await getApiKeyByValue(apiKey);
+  if (!profile || !(await isValidApiKey(apiKey))) {
+    log.warn("AUTH", "Invalid API key");
+    return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+  }
+  let identityContext = null;
+  let memoryProfile = null;
+  if (profile.isService) {
+    // Internal services (for example Hindsight itself) are authenticated but must
+    // preserve their requested model and skip identity/memory to avoid recursion.
+    log.debug("AUTH", `Internal service key: ${profile.name || profile.id}`);
+  } else {
+    const combo = profile.comboId ? await getComboById(profile.comboId) : null;
+    if (!combo) return errorResponse(HTTP_STATUS.FORBIDDEN, "API key has no valid combo assigned");
+    modelStr = combo.name;
+    body.model = combo.name;
+    if (clientRawRequest?.body) clientRawRequest.body.model = combo.name;
+    memoryProfile = profile;
+    const [mentalModel, memory] = await Promise.all([
+      mentalModelForProfile(profile),
+      recallForProfile(profile, body),
+    ]);
+    identityContext = {
+      id: profile.id,
+      name: profile.name,
+      globalInstructions: settings.globalInstructions || "",
+      soul: profile.soul,
+      bankId: profile.hindsightBankId,
+      mentalModelId: profile.mentalModelId,
+      mentalModel,
+      memory,
+    };
   }
 
   if (!modelStr) {
@@ -105,7 +133,7 @@ export async function handleChat(request, clientRawRequest = null) {
             const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
             cleanRawReq = { ...clientRawRequest, body: cleanBody };
           }
-          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey);
+          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, identityContext, memoryProfile);
         },
         log,
         comboName: modelStr,
@@ -119,7 +147,7 @@ export async function handleChat(request, clientRawRequest = null) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+      handleSingleModel: (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, identityContext, memoryProfile),
       log,
       comboName: modelStr,
       comboStrategy,
@@ -128,13 +156,13 @@ export async function handleChat(request, clientRawRequest = null) {
   }
 
   // Single model request
-  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey);
+  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey, identityContext, memoryProfile);
 }
 
 /**
  * Handle single model chat request
  */
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, identityContext = null, profile = null) {
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
@@ -158,7 +186,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
               const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
               cleanRawReq = { ...clientRawRequest, body: cleanBody };
             }
-            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey);
+            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, identityContext, profile);
           },
           log,
           comboName: modelStr,
@@ -172,7 +200,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       return handleComboChat({
         body,
         models: comboModels,
-        handleSingleModel: (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+        handleSingleModel: (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, identityContext, profile),
         log,
         comboName: modelStr,
         comboStrategy,
@@ -239,11 +267,13 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       connectionId: credentials.connectionId,
       userAgent,
       apiKey,
+      identityContext,
       ccFilterNaming: !!chatSettings.ccFilterNaming,
       rtkEnabled: !!chatSettings.rtkEnabled,
       headroomEnabled: !!chatSettings.headroomEnabled,
       headroomUrl: chatSettings.headroomUrl || DEFAULT_HEADROOM_URL,
       headroomCompressUserMessages: !!chatSettings.headroomCompressUserMessages,
+      headroomTimeoutMs: chatSettings.headroomTimeoutMs || 25000,
       cavemanEnabled: !!chatSettings.cavemanEnabled,
       cavemanLevel: chatSettings.cavemanLevel || "full",
       ponytailEnabled: !!chatSettings.ponytailEnabled,
@@ -266,6 +296,15 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       },
       onRequestSuccess: async () => {
         await clearAccountError(credentials.connectionId, credentials, model);
+        if (profile) {
+          const sourceBody = clientRawRequest?.body || body;
+          const sessionId = clientRawRequest?.headers?.["x-session-id"] || clientRawRequest?.headers?.["session-id"] || "anonymous";
+          const requestId = clientRawRequest?.headers?.["x-request-id"] || createHash("sha256")
+            .update(`${profile.id}\n${sessionId}\n${JSON.stringify(sourceBody)}`)
+            .digest("hex")
+            .slice(0, 32);
+          await retainForProfile(profile, sourceBody, `conversation_${profile.id}_${requestId}`);
+        }
       }
     });
 
