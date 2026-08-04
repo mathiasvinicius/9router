@@ -14,8 +14,8 @@ the provider-native request. The synthesized mental model is injected between
 the SOUL and request-specific recall. A successful request asynchronously
 retains the latest user message in the same bank.
 
-Mental models are created automatically with delta refresh enabled after
-Hindsight consolidation. They are not manually editable from the 9Router
+Mental models are created automatically in delta mode and refreshed every 15
+minutes when Hindsight marks them stale. They are not manually editable from the 9Router
 dashboard; source memories remain the authority.
 
 API authentication is mandatory for public inference routes. Internal callers

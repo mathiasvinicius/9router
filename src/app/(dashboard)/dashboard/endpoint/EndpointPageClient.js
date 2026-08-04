@@ -1220,7 +1220,7 @@ export default function APIPageClient({ machineId }) {
             placeholder="eve, mind, work..."
           />
           <p className="rounded-lg border border-border bg-surface-2 p-3 text-xs text-text-muted">
-            A mental model will be created automatically and refreshed after Hindsight consolidations.
+            A mental model will be created automatically and refreshed every 15 minutes when new memories make it stale.
           </p>
           <label className="text-sm font-medium">
             SOUL.md

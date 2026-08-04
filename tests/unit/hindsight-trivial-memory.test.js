@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  clearMemoryDedupCaches,
   isTrivialMemoryText,
   recallForProfile,
   retainForProfile,
@@ -13,6 +14,7 @@ const profile = {
 };
 
 afterEach(() => {
+  clearMemoryDedupCaches();
   vi.unstubAllGlobals();
 });
 
@@ -50,5 +52,45 @@ describe("Hindsight trivial-message filtering", () => {
     await expect(recallForProfile(profile, body)).resolves.toBe("");
     await expect(retainForProfile(profile, body, "conversation-test")).resolves.toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Hindsight agent-loop deduplication", () => {
+  it("reuses recall for repeated internal calls with the same user message", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ text: "recalled once" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const body = { messages: [{ role: "user", content: "Continue a tarefa da GPU" }] };
+
+    await expect(recallForProfile(profile, body)).resolves.toBe("recalled once");
+    await expect(recallForProfile(profile, body)).resolves.toBe("recalled once");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains repeated internal calls only once", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const body = { messages: [{ role: "user", content: "Continue a tarefa da GPU" }] };
+
+    await retainForProfile(profile, body, "conversation-1");
+    await retainForProfile(profile, body, "conversation-2");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retain injected temperament as user memory", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const body = {
+      messages: [{
+        role: "user",
+        content: "Continue a tarefa da GPU\n\n═══ EVE TEMPERAMENT\nstate: calm",
+      }],
+    };
+
+    await retainForProfile(profile, body, "conversation-1");
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(payload.items[0].content).toBe("Continue a tarefa da GPU");
   });
 });
