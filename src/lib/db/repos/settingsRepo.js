@@ -65,6 +65,7 @@ const DEFAULT_SETTINGS = {
   headroomUrl: DEFAULT_HEADROOM_URL,
   headroomCompressUserMessages: false,
   globalInstructions: DEFAULT_GLOBAL_INSTRUCTIONS,
+  headroomTimeoutMs: 3000,
   cavemanEnabled: false,
   cavemanLevel: "full",
   ponytailEnabled: false,
