@@ -16,4 +16,16 @@ describe("capacity adapter audio model filter", () => {
 
     expect(caps.audioInput).toBe(false);
   });
+
+  it("preserves audio input when a catalog payload omits modality fields", () => {
+    const caps = resolveCaps(
+      { "ag/gemini-3.6-flash-low": { vision: true, reasoning: true } },
+      {},
+      "ag/gemini-3.6-flash-low",
+    );
+
+    expect(caps.vision).toBe(true);
+    expect(caps.audioInput).toBe(true);
+    expect(caps.videoInput).toBe(true);
+  });
 });

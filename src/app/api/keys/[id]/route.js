@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteApiKey, getApiKeyById, getComboById, updateApiKey } from "@/lib/localDb";
 import { ensureBank, ensureMentalModel } from "@/lib/identityMemory/hindsight.js";
+import { resolveMemoryProfile } from "@/lib/identityMemory/profileConfig.js";
 
 // GET /api/keys/[id] - Get single key
 export async function GET(request, { params }) {
@@ -39,17 +40,28 @@ export async function PUT(request, { params }) {
       updateData.comboId = comboId;
     }
     if (soul !== undefined) updateData.soul = String(soul);
-    if (hindsightBankId !== undefined) {
-      if (!hindsightBankId || !/^[a-zA-Z0-9_.-]+$/.test(hindsightBankId)) {
-        return NextResponse.json({ error: "Invalid Hindsight bank ID" }, { status: 400 });
+    if (hindsightBankId !== undefined || memoryEnabled !== undefined) {
+      let memoryProfile;
+      try {
+        memoryProfile = resolveMemoryProfile({
+          enabled: memoryEnabled === undefined ? existing.memoryEnabled : !!memoryEnabled,
+          bankId: hindsightBankId === undefined ? existing.hindsightBankId : hindsightBankId,
+          mentalModelId: existing.mentalModelId,
+          name: updateData.name || existing.name,
+        });
+      } catch (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
       }
-      updateData.hindsightBankId = hindsightBankId;
-      await ensureBank(hindsightBankId, updateData.name || existing.name);
-      if (existing.mentalModelId) {
-        await ensureMentalModel(hindsightBankId, existing.mentalModelId, updateData.name || existing.name);
+      Object.assign(updateData, memoryProfile);
+      if (memoryProfile.memoryEnabled) {
+        await ensureBank(memoryProfile.hindsightBankId, updateData.name || existing.name);
+        await ensureMentalModel(
+          memoryProfile.hindsightBankId,
+          memoryProfile.mentalModelId,
+          updateData.name || existing.name,
+        );
       }
     }
-    if (memoryEnabled !== undefined) updateData.memoryEnabled = !!memoryEnabled;
 
     const updated = await updateApiKey(id, updateData);
 

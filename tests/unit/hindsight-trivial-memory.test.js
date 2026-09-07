@@ -79,6 +79,17 @@ describe("Hindsight agent-loop deduplication", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("consolidates observations in the shared bank scope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const body = { messages: [{ role: "user", content: "Prefiro respostas objetivas" }] };
+
+    await retainForProfile(profile, body, "conversation-1");
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(payload.items[0].tags).toEqual(["api-key:eve"]);
+    expect(payload.items[0].observation_scopes).toBe("shared");
+  });
+
   it("does not retain injected temperament as user memory", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);

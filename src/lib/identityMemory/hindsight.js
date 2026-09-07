@@ -250,6 +250,9 @@ export async function retainForProfile(profile, body, documentId) {
             context: `9Router conversation for ${profile.name || profile.id}`,
             document_id: documentId,
             tags: [`api-key:${profile.id}`],
+            // Keep provenance tags on raw facts while consolidating durable
+            // observations across sessions/API keys for this memory bank.
+            observation_scopes: "shared",
           }],
         }),
         signal: AbortSignal.timeout(5000),

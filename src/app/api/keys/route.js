@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getApiKeys, createApiKey, getComboById } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { ensureBank, ensureMentalModel } from "@/lib/identityMemory/hindsight.js";
+import { resolveMemoryProfile } from "@/lib/identityMemory/profileConfig.js";
 
 export const dynamic = "force-dynamic";
 
@@ -28,23 +29,31 @@ export async function POST(request) {
     if (!comboId || !(await getComboById(comboId))) {
       return NextResponse.json({ error: "A valid combo is required" }, { status: 400 });
     }
-    if (!hindsightBankId || !/^[a-zA-Z0-9_.-]+$/.test(hindsightBankId)) {
-      return NextResponse.json({ error: "A valid Hindsight bank ID is required" }, { status: 400 });
+    let memoryProfile;
+    try {
+      memoryProfile = resolveMemoryProfile({
+        enabled: memoryEnabled !== false,
+        bankId: hindsightBankId,
+        name,
+      });
+    } catch (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
     // Always get machineId from server
     const machineId = await getConsistentMachineId();
-    await ensureBank(hindsightBankId, name);
-    const slug = String(name).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "profile";
-    const mentalModelId = `${slug}-${crypto.randomUUID().slice(0, 8)}`;
-    await ensureMentalModel(hindsightBankId, mentalModelId, name);
+    if (memoryProfile.memoryEnabled) {
+      await ensureBank(memoryProfile.hindsightBankId, name);
+      await ensureMentalModel(
+        memoryProfile.hindsightBankId,
+        memoryProfile.mentalModelId,
+        name,
+      );
+    }
     const apiKey = await createApiKey(name, machineId, {
       comboId,
       soul: typeof soul === "string" ? soul : "",
-      hindsightBankId,
-      mentalModelId,
-      memoryEnabled: memoryEnabled !== false,
+      ...memoryProfile,
     });
 
     return NextResponse.json({

@@ -640,7 +640,11 @@ export default function APIPageClient({ machineId }) {
   };
 
   const handleCreateKey = async () => {
-    if (!newKeyName.trim() || !profileForm.comboId || !profileForm.hindsightBankId.trim()) return;
+    if (
+      !newKeyName.trim()
+      || !profileForm.comboId
+      || (profileForm.memoryEnabled && !profileForm.hindsightBankId.trim())
+    ) return;
 
     try {
       const res = await fetch("/api/keys", {
@@ -1214,14 +1218,15 @@ export default function APIPageClient({ machineId }) {
             </select>
           </label>
           <Input
-            label="Hindsight Bank ID"
+            label={`Hindsight Bank ID${profileForm.memoryEnabled ? " (required)" : " (optional)"}`}
             value={profileForm.hindsightBankId}
             onChange={(event) => setProfileForm((value) => ({ ...value, hindsightBankId: event.target.value }))}
             placeholder="eve, mind, work..."
+            disabled={!profileForm.memoryEnabled}
           />
-          <p className="rounded-lg border border-border bg-surface-2 p-3 text-xs text-text-muted">
+          {profileForm.memoryEnabled && <p className="rounded-lg border border-border bg-surface-2 p-3 text-xs text-text-muted">
             A mental model will be created automatically and refreshed every 15 minutes when new memories make it stale.
-          </p>
+          </p>}
           <label className="text-sm font-medium">
             SOUL.md
             <textarea
@@ -1238,7 +1243,8 @@ export default function APIPageClient({ machineId }) {
           </label>
           <div className="flex gap-2">
             <Button onClick={handleCreateKey} fullWidth
-              disabled={!newKeyName.trim() || !profileForm.comboId || !profileForm.hindsightBankId.trim()}>
+              disabled={!newKeyName.trim() || !profileForm.comboId
+                || (profileForm.memoryEnabled && !profileForm.hindsightBankId.trim())}>
               Create
             </Button>
             <Button
@@ -1272,10 +1278,12 @@ export default function APIPageClient({ machineId }) {
               {combos.map((combo) => <option key={combo.id} value={combo.id}>{combo.name}</option>)}
             </select>
           </label>
-          <Input label="Hindsight Bank ID" value={editingKey.hindsightBankId || ""}
-            onChange={(event) => setEditingKey((value) => ({ ...value, hindsightBankId: event.target.value }))} />
-          <Input label="Automatic Mental Model" value={editingKey.mentalModelId || "Created on next migration"}
-            readOnly />
+          <Input label={`Hindsight Bank ID${editingKey.memoryEnabled !== false ? " (required)" : " (optional)"}`}
+            value={editingKey.hindsightBankId || ""}
+            onChange={(event) => setEditingKey((value) => ({ ...value, hindsightBankId: event.target.value }))}
+            disabled={editingKey.memoryEnabled === false} />
+          {editingKey.memoryEnabled !== false && <Input label="Automatic Mental Model"
+            value={editingKey.mentalModelId || "Created automatically when saved"} readOnly />}
           <label className="text-sm font-medium">
             SOUL.md
             <textarea className="mt-1 min-h-64 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm"
@@ -1289,7 +1297,8 @@ export default function APIPageClient({ machineId }) {
           </label>
           <div className="flex gap-2">
             <Button fullWidth onClick={handleSaveProfile}
-              disabled={!editingKey.comboId || !editingKey.hindsightBankId}>Save</Button>
+              disabled={!editingKey.comboId
+                || (editingKey.memoryEnabled !== false && !editingKey.hindsightBankId)}>Save</Button>
             <Button fullWidth variant="ghost" onClick={() => setEditingKey(null)}>Cancel</Button>
           </div>
         </div>}

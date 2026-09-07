@@ -40,12 +40,10 @@ function loadModelCaps() {
 // Resolve caps from a "provider/model" string or a bare model id.
 export function resolveCaps(byFull, byId, key) {
   if (!key) return null;
-  if (byFull[key]) return byFull[key];
   const bare = key.includes("/") ? key.slice(key.indexOf("/") + 1) : key;
-  if (byId[bare]) return byId[bare];
   const provider = key.includes("/") ? key.slice(0, key.indexOf("/")) : null;
   const c = getCapabilitiesForModel(provider, bare);
-  return {
+  const fallback = {
     vision: c.vision,
     pdf: c.pdf,
     audioInput: c.audioInput,
@@ -55,6 +53,11 @@ export function resolveCaps(byFull, byId, key) {
     contextWindow: c.contextWindow,
     maxOutput: c.maxOutput,
   };
+  // Merge catalog values over the local capability map instead of returning
+  // early. Older/stale API payloads may omit newer modality fields such as
+  // audioInput; an early return made every such model disappear from the
+  // Audio Adapter picker after /api/models finished loading.
+  return { ...fallback, ...(byFull[key] || byId[bare] || {}) };
 }
 
 export function useModelCaps() {
