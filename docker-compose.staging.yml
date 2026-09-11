@@ -15,4 +15,4 @@ services:
       HOSTNAME: "0.0.0.0"
       NODE_ENV: production
       HEADROOM_URL: http://127.0.0.1:8878
-      HINDSIGHT_API_URL: http://127.0.0.1:8888
+      HINDSIGHT_API_URL: http://100.66.108.56:8888
