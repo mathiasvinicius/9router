@@ -1,18 +1,19 @@
+name: 9router
+
 services:
-  zion-router:
+  9router:
     build:
       context: .
       dockerfile: Dockerfile
-    image: zion-router:local
-    container_name: zion-router
+    image: 9router:custom
+    container_name: 9router
     restart: unless-stopped
     network_mode: host
     volumes:
-      - /opt/zion-router/data:/app/data
+      - /opt/containers/9ROUTER/data:/app/data
     environment:
       DATA_DIR: /app/data
-      PORT: "20131"
+      PORT: "20128"
       HOSTNAME: "0.0.0.0"
       NODE_ENV: production
-      HEADROOM_URL: http://127.0.0.1:8878
       HINDSIGHT_API_URL: http://100.66.108.56:8888
